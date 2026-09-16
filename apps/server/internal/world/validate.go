@@ -7,6 +7,10 @@ import (
 
 // Validate checks the structural invariants a simulated world must satisfy.
 // It runs on generated worlds and on anything loaded from world.json.
+//
+// It deliberately does not enforce the generator's shape constraints (3-8 stops
+// per line, at most 3 waypoints per gap) — a hand-written world.json is free to
+// ignore those. validateGenerated covers them for generated worlds.
 func (w *World) Validate() error {
 	var errs error
 	add := func(format string, args ...any) {
@@ -56,8 +60,8 @@ func (w *World) Validate() error {
 		if !l.Kind.Valid() {
 			add("line %q has invalid kind %q", l.ID, l.Kind)
 		}
-		if n := len(l.Stops); n < MinStops || n > MaxStops {
-			add("line %q has %d stops, want %d-%d", l.ID, n, MinStops, MaxStops)
+		if n := len(l.Stops); n < 2 {
+			add("line %q has %d stops, want at least 2", l.ID, n)
 		}
 		for _, sid := range l.Stops {
 			if !seenStation[sid] {
@@ -66,21 +70,8 @@ func (w *World) Validate() error {
 			}
 			served[sid] = true
 		}
-		if len(l.stopAt) == len(l.Stops) {
-			for j := 0; j+1 < len(l.stopAt); j++ {
-				if gap := l.stopAt[j+1] - l.stopAt[j] - 1; gap < 0 || gap > MaxWaypoints {
-					add("line %q has %d waypoints between stops %d and %d, want 0-%d",
-						l.ID, gap, j, j+1, MaxWaypoints)
-				}
-			}
-			if l.Kind == KindLoop {
-				// The closing gap runs from the last stop to the end of the
-				// track and then back to Track[0].
-				if gap := len(l.Track) - 1 - l.stopAt[len(l.stopAt)-1]; gap < 0 || gap > MaxWaypoints {
-					add("line %q has %d waypoints on the closing gap, want 0-%d",
-						l.ID, gap, MaxWaypoints)
-				}
-			} else if last := l.stopAt[len(l.stopAt)-1]; last != len(l.Track)-1 {
+		if len(l.stopAt) == len(l.Stops) && l.Kind == KindShuttle {
+			if last := l.stopAt[len(l.stopAt)-1]; last != len(l.Track)-1 {
 				add("line %q is a shuttle whose track continues past its last stop", l.ID)
 			}
 		}

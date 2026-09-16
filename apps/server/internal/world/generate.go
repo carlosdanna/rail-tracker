@@ -1,6 +1,7 @@
 package world
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -101,7 +102,38 @@ func Generate(p GenParams) (*World, error) {
 	if err := w.Validate(); err != nil {
 		return nil, fmt.Errorf("generated world is invalid: %w", err)
 	}
+	if err := validateGenerated(w); err != nil {
+		return nil, fmt.Errorf("generated world is invalid: %w", err)
+	}
 	return w, nil
+}
+
+// validateGenerated enforces the shape constraints that apply to generated
+// worlds only: 3-8 stops per line and at most MaxWaypoints between stops.
+func validateGenerated(w *World) error {
+	var errs error
+	for i := range w.Lines {
+		l := &w.Lines[i]
+		if n := len(l.Stops); n < MinStops || n > MaxStops {
+			errs = errors.Join(errs, fmt.Errorf("line %q has %d stops, want %d-%d",
+				l.ID, n, MinStops, MaxStops))
+		}
+		for j := 0; j+1 < len(l.stopAt); j++ {
+			if gap := l.stopAt[j+1] - l.stopAt[j] - 1; gap < 0 || gap > MaxWaypoints {
+				errs = errors.Join(errs, fmt.Errorf("line %q has %d waypoints between stops %d and %d, want 0-%d",
+					l.ID, gap, j, j+1, MaxWaypoints))
+			}
+		}
+		if l.Kind == KindLoop {
+			// The closing gap runs from the last stop to the end of the track
+			// and then back to Track[0].
+			if gap := len(l.Track) - 1 - l.stopAt[len(l.stopAt)-1]; gap < 0 || gap > MaxWaypoints {
+				errs = errors.Join(errs, fmt.Errorf("line %q has %d waypoints on the closing gap, want 0-%d",
+					l.ID, gap, MaxWaypoints))
+			}
+		}
+	}
+	return errs
 }
 
 // genStations places stations by rejection sampling, keeping them at least
