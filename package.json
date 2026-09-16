@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "packageManager": "pnpm@11.25.0",
+  "packageManager": "pnpm@12.4.2",
   "scripts": {
     "dev": "pnpm --filter @rail-tracker/client dev",
     "build": "pnpm -r build",
@@ -11,6 +11,7 @@
     "lint": "pnpm -r lint"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12",
+    "pnpm": ">=12"
   }
 }

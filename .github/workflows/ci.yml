@@ -21,10 +21,10 @@
 #     timeout-minutes: 15
 
 #     steps:
-#       - uses: actions/checkout@v4
+#       - uses: actions/checkout@v7
 
 #       - name: Set up Go
-#         uses: actions/setup-go@v5
+#         uses: actions/setup-go@v7
 #         with:
 #           # Track the go directive in apps/server/go.mod rather than pinning
 #           # a version here that would drift away from it.
@@ -32,12 +32,12 @@
 #           cache-dependency-path: apps/server/go.sum
 
 #       - name: Set up pnpm
-#         uses: pnpm/action-setup@v4
+#         uses: pnpm/action-setup@v6
 
 #       - name: Set up Node
-#         uses: actions/setup-node@v4
+#         uses: actions/setup-node@v7
 #         with:
-#           node-version: 22
+#           node-version: 24
 #           cache: pnpm
 
 #       - name: Install workspace dependencies
@@ -72,7 +72,7 @@
 #     timeout-minutes: 15
 
 #     steps:
-#       - uses: actions/checkout@v4
+#       - uses: actions/checkout@v7
 
 #       - name: Build the server image
 #         run: docker build -f apps/server/Dockerfile -t rail-tracker-server .

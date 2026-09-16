@@ -133,13 +133,12 @@ export function simulate(opts: SynthOptions): TrainUpdate[] {
 
   // Place the train at its starting offset along the track.
   let seg = 0;
-  let progress = 0;
   let remainingOffset = startFraction * total;
   while (seg < nSeg - 1 && remainingOffset >= (lengths[seg] ?? 0)) {
     remainingOffset -= lengths[seg] ?? 0;
     seg++;
   }
-  progress = remainingOffset;
+  let progress = remainingOffset;
 
   let dir: 1 | -1 = 1;
   let dwellLeft = 0;
@@ -167,7 +166,6 @@ export function simulate(opts: SynthOptions): TrainUpdate[] {
 
       if (step2 < toEnd) {
         progress += dir * step2;
-        time = 0;
         break;
       }
 

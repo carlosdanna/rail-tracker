@@ -20,7 +20,15 @@ docs/            specification and measured results
 ## Requirements
 
 - Go ≥ 1.23
-- Node ≥ 20 and pnpm ≥ 10
+- Node ≥ 22.12 (24 is what CI and the container images use)
+- pnpm ≥ 12 — the version is pinned in `package.json`, so `corepack` or a recent
+  pnpm will fetch the right one automatically
+
+TypeScript is held at 6.x on purpose. The code itself compiles clean under
+TypeScript 7, but `typescript-eslint` refuses to run against it and the lint
+step fails outright ([typescript-eslint#10940]). Move to 7 once that lands.
+
+[typescript-eslint#10940]: https://github.com/typescript-eslint/typescript-eslint/issues/10940
 
 ## Quick start
 
