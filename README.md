@@ -69,6 +69,14 @@ cd apps/server && go run ./cmd/railsim --help
 | `POST /config` | `{"rate": n}` — new default rate for clients that have not overridden it |
 | `GET /healthz` | liveness plus the current simulation tick |
 
+## Measured results
+
+[`docs/RESULTS.md`](docs/RESULTS.md) records the acceptance runs from spec §5 with
+the commands that reproduce them: 80,000 updates/sec out of one server process at
+2.5% of a core, a client ingest path costing 0.11 ms of a 16.7 ms frame, flat
+memory over six million updates, and reconstruction matching `/world` exactly at
+500 trains with and without `--hide-state`.
+
 ## Benchmarking
 
 `make bench` builds the server, starts it on `127.0.0.1:18080` with 500 trains,
@@ -78,3 +86,19 @@ opens eight streaming connections and reports throughput and `seq` gaps:
 make bench
 make bench BENCH_FLAGS="-conns 32 -rate 10000 -format bin -duration 30s"
 ```
+
+Two longer checks are kept as tests and skipped unless asked for, because each
+needs a running server or a few seconds of simulated load:
+
+```sh
+cd apps/client
+
+# Ingest cost and memory for 10 minutes of stream at the acceptance settings.
+RAIL_BENCH=1 RAIL_BENCH_SECONDS=600 NODE_OPTIONS=--expose-gc npx vitest run bench
+
+# Reconstruction against a live server's /world. Add RAIL_HIDE=1 for hard mode.
+RAIL_LIVE=1 RAIL_ADDR=127.0.0.1:8080 RAIL_SECONDS=220 npx vitest run live
+```
+
+The client also takes a `?perf` query parameter, which logs FPS, ingest rate,
+drops and heap size to the console every ten seconds.

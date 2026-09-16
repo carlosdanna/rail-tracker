@@ -12,8 +12,8 @@
  * a train that has ever reversed is never reported as a loop.
  */
 import { headingDelta } from "../store/trails";
-import { dist, distToPath, pathLength } from "./geometry";
-import type { Point } from "./geometry";
+import { bbox, boxesOverlap, dist, distToPath } from "./geometry";
+import type { Box, Point } from "./geometry";
 
 export type LineKind = "loop" | "shuttle";
 
@@ -34,6 +34,11 @@ export interface InferredLine {
   colorIndex: number;
 }
 
+/** A line plus the extent used to reject non-matches cheaply. */
+interface LineRecord extends InferredLine {
+  box: Box;
+}
+
 export interface LineInferenceOptions {
   /** Minimum movement before a new point joins a train's path, in world units. */
   step?: number;
@@ -52,6 +57,12 @@ export interface LineInferenceOptions {
   closureDegrees?: number;
   /** A loop must be at least this long, to reject a train shuffling in place. */
   minLoopLength?: number;
+  /**
+   * Most points to hold for one train before giving up and starting again. A
+   * train whose line has not resolved in this many points is not going to, and
+   * without a cap its path would grow for as long as the page is open.
+   */
+  maxPoints?: number;
 }
 
 const DEFAULTS = {
@@ -62,6 +73,7 @@ const DEFAULTS = {
   retraceTolerance: 5,
   closureDegrees: 45,
   minLoopLength: 120,
+  maxPoints: 4096,
 } satisfies Required<LineInferenceOptions>;
 
 /**
@@ -84,6 +96,8 @@ export class TrainPath {
   #lastHeading: number | null = null;
   #startHeading: number | null = null;
   #maxFromStart = 0;
+  /** Running length of #points, kept incrementally rather than re-measured. */
+  #length = 0;
   #result: ReconstructedPath | null = null;
   /** A sharp turn awaiting confirmation, as an index into #points. */
   #pending: number | null = null;
@@ -119,17 +133,22 @@ export class TrainPath {
   add(x: number, y: number, heading: number, speed = 1): void {
     if (this.#result !== null) return;
 
-    const p = { x, y };
     const last = this.#points[this.#points.length - 1];
 
     if (last === undefined) {
-      this.#points.push(p);
+      this.#points.push({ x, y });
       this.#lastHeading = heading;
       if (speed > 0) this.#startHeading = heading;
       return;
     }
     if (this.#startHeading === null && speed > 0) this.#startHeading = heading;
-    if (dist(p, last) < this.#opts.step) return;
+
+    // Most updates are rejected by the thinning threshold, so measure before
+    // allocating: at 10,000 updates/sec a point object per update is pure
+    // garbage-collector pressure.
+    const moved = Math.hypot(x - last.x, y - last.y);
+    if (moved < this.#opts.step) return;
+    const p = { x, y };
 
     // A stationary train reports whatever heading it last had, so only trust
     // the heading of a train that is actually moving.
@@ -143,6 +162,7 @@ export class TrainPath {
       this.#lastHeading = heading;
     }
 
+    this.#length += moved;
     this.#points.push(p);
 
     const start = this.#points[0];
@@ -153,6 +173,27 @@ export class TrainPath {
 
     this.#judgePending();
     this.#tryClose();
+
+    if (this.#result === null && this.#points.length > this.#opts.maxPoints) {
+      this.#restart(p, heading);
+    }
+  }
+
+  /**
+   * Throws away the history and watches this train afresh from where it is now.
+   * Whatever it was doing did not resolve, and holding the points forever would
+   * be a slow leak on every unresolved train.
+   */
+  #restart(from: Point, heading: number): void {
+    this.#points.length = 0;
+    this.#points.push(from);
+    this.#reversals.length = 0;
+    this.#pending = null;
+    this.#pendingClose = null;
+    this.#maxFromStart = 0;
+    this.#length = 0;
+    this.#startHeading = heading;
+    this.#lastHeading = heading;
   }
 
   /**
@@ -241,7 +282,7 @@ export class TrainPath {
     const tol = this.#opts.tolerance;
     // It must have genuinely gone somewhere before coming back.
     if (this.#maxFromStart < 4 * tol) return;
-    if (pathLength(this.#points) < this.#opts.minLoopLength) return;
+    if (this.#length < this.#opts.minLoopLength) return;
     if (dist(current, start) > tol) return;
 
     // Being back where it started is not enough. The two legs of a hairpin run
@@ -273,9 +314,32 @@ export class TrainPath {
   }
 }
 
+/**
+ * How many points of a path are probed when matching it against another.
+ *
+ * Paths are dense samples of the same track — a point every few units — so
+ * testing all of them is wasted work, and matching is O(probes x segments) in a
+ * loop that runs once per train. Probing a bounded number keeps grouping cheap
+ * without loosening the test: a stride of a handful of points is still far finer
+ * than the tolerance the match is judged at.
+ */
+const MATCH_PROBES = 96;
+
 /** Do two reconstructed paths describe the same line? */
-export function pathsMatch(a: ReconstructedPath, b: ReconstructedPath, tolerance: number): boolean {
+export function pathsMatch(
+  a: ReconstructedPath,
+  b: ReconstructedPath,
+  tolerance: number,
+  boxes?: { a: Box; b: Box },
+): boolean {
   if (a.kind !== b.kind) return false;
+
+  // Two lines in different parts of the world cannot match, and finding that
+  // out from their extents costs nothing.
+  const boxA = boxes?.a ?? bbox(a.points);
+  const boxB = boxes?.b ?? bbox(b.points);
+  if (!boxesOverlap(boxA, boxB, tolerance)) return false;
+
   const closedA = a.kind === "loop";
   const closedB = b.kind === "loop";
 
@@ -287,18 +351,27 @@ export function pathsMatch(a: ReconstructedPath, b: ReconstructedPath, tolerance
   );
 }
 
-/** Largest distance from any point of `points` to `path`. */
+/** Largest distance from any probed point of `points` to `path`. */
 function maxDistanceToPath(
   points: readonly Point[],
   path: readonly Point[],
   closed: boolean,
 ): number {
+  if (points.length === 0) return 0;
+  const stride = Math.max(1, Math.floor(points.length / MATCH_PROBES));
+
   let worst = 0;
-  for (const p of points) {
+  for (let i = 0; i < points.length; i += stride) {
+    const p = points[i];
+    if (p === undefined) continue;
     const d = distToPath(p, path, closed);
     if (d > worst) worst = d;
-    // Bail out early once it is clearly not a match.
-    if (worst === Infinity) return worst;
+  }
+  // The ends matter most, so never let the stride skip the final point.
+  const last = points[points.length - 1];
+  if (last !== undefined) {
+    const d = distToPath(last, path, closed);
+    if (d > worst) worst = d;
   }
   return worst;
 }
@@ -309,7 +382,7 @@ function maxDistanceToPath(
 export class LineInference {
   readonly #opts: Required<LineInferenceOptions>;
   readonly #paths = new Map<string, TrainPath>();
-  readonly #lines: InferredLine[] = [];
+  readonly #lines: LineRecord[] = [];
   /** Which line each train ended up on. */
   readonly #assignment = new Map<string, string>();
 
@@ -360,22 +433,28 @@ export class LineInference {
 
   /** Puts a completed path on a matching line, or opens a new one. */
   #assign(trainId: string, result: ReconstructedPath): string {
+    const box = bbox(result.points);
     for (const line of this.#lines) {
-      if (pathsMatch(result, { kind: line.kind, points: line.points }, this.#opts.tolerance)) {
+      const candidate = { kind: line.kind, points: line.points };
+      if (pathsMatch(result, candidate, this.#opts.tolerance, { a: box, b: line.box })) {
         line.trainIds.push(trainId);
         // Keep the longer reconstruction: it is the better description of the
         // line, especially for a shuttle seen from a mid-track start.
-        if (result.points.length > line.points.length) line.points = result.points;
+        if (result.points.length > line.points.length) {
+          line.points = result.points;
+          line.box = box;
+        }
         return line.id;
       }
     }
 
-    const line: InferredLine = {
+    const line: LineRecord = {
       id: `inferred-${this.#lines.length}`,
       kind: result.kind,
       points: result.points,
       trainIds: [trainId],
       colorIndex: this.#lines.length,
+      box,
     };
     this.#lines.push(line);
     return line.id;

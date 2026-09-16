@@ -64,13 +64,26 @@ export function pathLength(path: readonly Point[], closed = false): number {
   return total;
 }
 
-/** Axis-aligned bounding box of a set of points. */
-export function bbox(points: readonly Point[]): {
+/** An axis-aligned bounding box. */
+export interface Box {
   minX: number;
   minY: number;
   maxX: number;
   maxY: number;
-} {
+}
+
+/** Do two boxes come within `slack` of each other? */
+export function boxesOverlap(a: Box, b: Box, slack = 0): boolean {
+  return (
+    a.minX - slack <= b.maxX &&
+    b.minX - slack <= a.maxX &&
+    a.minY - slack <= b.maxY &&
+    b.minY - slack <= a.maxY
+  );
+}
+
+/** Axis-aligned bounding box of a set of points. */
+export function bbox(points: readonly Point[]): Box {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;

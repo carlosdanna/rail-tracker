@@ -26,7 +26,10 @@ export interface TrailOptions {
 const DEFAULTS = {
   epsilon: 4,
   delta: 8,
-  cap: 2048,
+  // Per train. A trail stops growing once its line is reconstructed, so this
+  // only bounds the trains still being worked out, but at 500 trains the cap is
+  // what keeps the total bounded rather than merely finite.
+  cap: 512,
 } satisfies Required<TrailOptions>;
 
 /** Smallest signed difference between two headings, in degrees. */

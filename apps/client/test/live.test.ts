@@ -9,8 +9,10 @@ import { LineInference } from "../src/infer/lines";
 import { StationInference } from "../src/infer/stations";
 import { distToPath } from "../src/infer/geometry";
 
-const ADDR = process.env["RAIL_ADDR"] ?? "127.0.0.1:18090";
-const SECONDS = Number(process.env["RAIL_SECONDS"] ?? "120");
+const ADDR = process.env["RAIL_ADDR"] ?? "127.0.0.1:8080";
+const SECONDS = Number(process.env["RAIL_SECONDS"] ?? "180");
+const RATE = process.env["RAIL_RATE"] ?? "10000";
+const HIDE = process.env["RAIL_HIDE"] === "1";
 
 interface WorldStation {
   id: string;
@@ -36,7 +38,7 @@ describe.runIf(process.env["RAIL_LIVE"] === "1")("live reconstruction", () => {
       const lines = new LineInference();
       const stations = new StationInference();
 
-      const ws = new WebSocket(`ws://${ADDR}/stream?rate=4000&format=bin`);
+      const ws = new WebSocket(`ws://${ADDR}/stream?rate=${RATE}&format=bin`);
       ws.binaryType = "arraybuffer";
       await new Promise<void>((resolve, reject) => {
         ws.onopen = () => resolve();
@@ -48,7 +50,9 @@ describe.runIf(process.env["RAIL_LIVE"] === "1")("live reconstruction", () => {
         const batch = parseBinaryBatch(ev.data);
         for (const u of batch.updates) {
           lines.observe(u.id, u.x, u.y, u.heading, u.speed);
-          stations.observe(u.id, u.x, u.y, u.speed, u.state);
+          // RAIL_HIDE forces the hard mode even against a server that is
+          // reporting state, so both paths can be checked in one run.
+          stations.observe(u.id, u.x, u.y, u.speed, HIDE ? "unknown" : u.state);
         }
       };
 
@@ -57,9 +61,13 @@ describe.runIf(process.env["RAIL_LIVE"] === "1")("live reconstruction", () => {
 
       const found = stations.stations();
       console.log(
-        `inferred ${lines.lines.length} lines (truth ${world.lines.length}), ` +
+        `rate=${RATE} hideState=${String(HIDE)} | ` +
+          `inferred ${lines.lines.length} lines (truth ${world.lines.length}), ` +
           `${found.length} stations (truth ${world.stations.length})`,
       );
+      for (const l of lines.lines) {
+        console.log(`  ${l.id} kind=${l.kind} trains=${l.trainIds.length}`);
+      }
 
       // Every real station has an inferred one near it.
       let worstStation = 0;
