@@ -1,0 +1,12 @@
+{
+  "type": "hello",
+  "version": 1,
+  "bounds": {
+    "w": 1000,
+    "h": 1000
+  },
+  "trainCount": 12,
+  "rate": 10000,
+  "format": "json",
+  "hideState": false
+}

@@ -1,0 +1,86 @@
+{
+  "type": "batch",
+  "t": 1726400000123,
+  "updates": [
+    {
+      "seq": 1000,
+      "train": "T-0",
+      "x": 511.385,
+      "y": 115.91,
+      "heading": 109.6,
+      "compass": "E",
+      "speed": 49.264,
+      "state": "running"
+    },
+    {
+      "seq": 1001,
+      "train": "T-1",
+      "x": 667.985,
+      "y": 573.954,
+      "heading": 173,
+      "compass": "S",
+      "speed": 41.374,
+      "state": "running"
+    },
+    {
+      "seq": 1002,
+      "train": "T-2",
+      "x": 100.934,
+      "y": 384.515,
+      "heading": 144.7,
+      "compass": "SE",
+      "speed": 34.256,
+      "state": "running"
+    },
+    {
+      "seq": 1003,
+      "train": "T-3",
+      "x": 610.844,
+      "y": 545.034,
+      "heading": 43.9,
+      "compass": "NE",
+      "speed": 37.88,
+      "state": "running"
+    },
+    {
+      "seq": 1004,
+      "train": "T-4",
+      "x": 879.66,
+      "y": 788.221,
+      "heading": 160.4,
+      "compass": "S",
+      "speed": 37.019,
+      "state": "running"
+    },
+    {
+      "seq": 1005,
+      "train": "T-5",
+      "x": 892.711,
+      "y": 145.788,
+      "heading": 172.6,
+      "compass": "S",
+      "speed": 34.573,
+      "state": "running"
+    },
+    {
+      "seq": 1006,
+      "train": "T-6",
+      "x": 620.06,
+      "y": 611.363,
+      "heading": 267.1,
+      "compass": "W",
+      "speed": 43.804,
+      "state": "running"
+    },
+    {
+      "seq": 1007,
+      "train": "T-7",
+      "x": 351.447,
+      "y": 913.331,
+      "heading": 321.4,
+      "compass": "NW",
+      "speed": 0,
+      "state": "at_station"
+    }
+  ]
+}
