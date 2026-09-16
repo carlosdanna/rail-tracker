@@ -46,7 +46,7 @@ make dev RAIL_FLAGS="--trains 500 --rate 10000"
 | `make build` | Builds `apps/server/bin/railsim` and the client bundle |
 | `make test`  | `go test ./...` and `pnpm -r test`                     |
 | `make lint`  | `go vet`, `gofmt -l`, ESLint and Prettier              |
-| `make bench` | Drives the server with the load client                 |
+| `make bench` | Starts a server and drives it with the load client     |
 | `make fmt`   | Formats Go and TypeScript in place                     |
 
 ## Server configuration
@@ -57,4 +57,24 @@ environment. See spec §3 for the full table.
 
 ```sh
 cd apps/server && go run ./cmd/railsim --help
+```
+
+## HTTP surface
+
+| Route | Purpose |
+|---|---|
+| `GET /stream` | WebSocket update stream; `?format=json\|bin`, `?rate=<int>` |
+| `GET /world` | the full world, for verifying the client's reconstruction |
+| `GET /metrics` | client count, totals and per-client sent/dropped counters |
+| `POST /config` | `{"rate": n}` — new default rate for clients that have not overridden it |
+| `GET /healthz` | liveness plus the current simulation tick |
+
+## Benchmarking
+
+`make bench` builds the server, starts it on `127.0.0.1:18080` with 500 trains,
+opens eight streaming connections and reports throughput and `seq` gaps:
+
+```sh
+make bench
+make bench BENCH_FLAGS="-conns 32 -rate 10000 -format bin -duration 30s"
 ```

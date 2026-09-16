@@ -8,7 +8,6 @@ PNPM ?= pnpm
 # Flags used by `make dev` and `make bench`; override on the command line, e.g.
 #   make dev RAIL_FLAGS="--trains 500 --rate 10000"
 RAIL_FLAGS ?=
-BENCH_FLAGS ?= -conns 8 -rate 1000 -duration 10s
 
 .PHONY: all install dev dev-server dev-client build build-server build-client \
         test test-go test-ts lint lint-go lint-ts fmt bench clean
@@ -65,14 +64,20 @@ fmt:
 	cd $(SERVER) && gofmt -w .
 	$(PNPM) --filter @rail-tracker/client format
 
-## bench: drive the server with the load client and report throughput.
-## Placeholder until cmd/loadclient lands in phase 4.
-bench:
-	@if [ -d "$(SERVER)/cmd/loadclient" ]; then \
-	  cd $(SERVER) && $(GO) run ./cmd/loadclient $(BENCH_FLAGS); \
-	else \
-	  echo "bench: cmd/loadclient not built yet (phase 4)"; \
-	fi
+## bench: start a server, drive it with the load client, then stop it.
+BENCH_ADDR ?= 127.0.0.1:18080
+BENCH_SERVER_FLAGS ?= --trains 500 --rate 10000
+BENCH_FLAGS ?= -conns 8 -rate 10000 -format bin -duration 10s
+
+bench: build-server
+	@$(SERVER)/bin/railsim --addr $(BENCH_ADDR) $(BENCH_SERVER_FLAGS) & \
+	srv=$$!; \
+	trap "kill $$srv 2>/dev/null" EXIT INT TERM; \
+	for i in $$(seq 50); do \
+	  curl -sf http://$(BENCH_ADDR)/healthz >/dev/null && break; \
+	  sleep 0.2; \
+	done; \
+	cd $(SERVER) && $(GO) run ./cmd/loadclient -addr $(BENCH_ADDR) $(BENCH_FLAGS)
 
 clean:
 	rm -rf $(SERVER)/bin $(CLIENT)/dist
