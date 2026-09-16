@@ -1,0 +1,42 @@
+# Runs the simulator and the built client together:
+#
+#   docker compose up --build      # then open http://localhost:8081
+#
+# Override the simulation from the environment; every flag in spec §3 has a
+# RAIL_* variable, so no rebuild is needed to change the shape of the world.
+services:
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    environment:
+      RAIL_TRAINS: "${RAIL_TRAINS:-500}"
+      RAIL_RATE: "${RAIL_RATE:-10000}"
+      RAIL_SEED: "${RAIL_SEED:-42}"
+      RAIL_FORMAT: "${RAIL_FORMAT:-bin}"
+      RAIL_HIDE_STATE: "${RAIL_HIDE_STATE:-false}"
+    ports:
+      # Exposed so /world and /metrics can be inspected directly.
+      - "8080:8080"
+    # No healthcheck: the image is distroless, so there is no shell or curl to
+    # probe /healthz with, and adding a probe mode to railsim would mean a flag
+    # that is not in the spec. Check it from outside with:
+    #   curl -s localhost:8080/healthz
+    restart: unless-stopped
+
+  client:
+    build:
+      context: .
+      dockerfile: apps/client/Dockerfile
+    ports:
+      - "8081:80"
+    depends_on:
+      - server
+    healthcheck:
+      # Checks that nginx is serving its own bundle, not that the server is up:
+      # 127.0.0.1 rather than localhost, which resolves to ::1 first.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped

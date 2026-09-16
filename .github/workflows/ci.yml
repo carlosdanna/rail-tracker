@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a branch makes the run in flight for it pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: lint, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # Track the go directive in apps/server/go.mod rather than pinning
+          # a version here that would drift away from it.
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: Build
+        run: make build
+
+      # The Go tests cover concurrency the race detector is the only real check
+      # on: the emitter, the writer queue and the snapshot handoff.
+      - name: Test with the race detector
+        run: cd apps/server && go test -race -count=1 ./...
+
+      - name: Check the protocol fixtures are up to date
+        run: |
+          cd apps/server && go test ./internal/encode -update
+          cd "$GITHUB_WORKSPACE"
+          if ! git diff --exit-code --stat protocol/fixtures; then
+            echo "::error::protocol/fixtures is stale. Regenerate with: cd apps/server && go test ./internal/encode -update"
+            exit 1
+          fi
+
+  docker:
+    name: docker images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the server image
+        run: docker build -f apps/server/Dockerfile -t rail-tracker-server .
+
+      - name: Build the client image
+        run: docker build -f apps/client/Dockerfile -t rail-tracker-client .
+
+      - name: Start the stack and check it answers
+        run: |
+          docker compose up -d --wait --wait-timeout 120
+          curl --fail --silent --show-error http://localhost:8080/healthz
+          curl --fail --silent --show-error --output /dev/null http://localhost:8081/
+          curl --fail --silent --show-error --output /dev/null http://localhost:8081/world
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down --volumes

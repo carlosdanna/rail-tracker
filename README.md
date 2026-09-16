@@ -49,6 +49,21 @@ make dev RAIL_FLAGS="--trains 500 --rate 10000"
 | `make bench` | Starts a server and drives it with the load client     |
 | `make fmt`   | Formats Go and TypeScript in place                     |
 
+## Containers
+
+```sh
+docker compose up --build       # then open http://localhost:8081
+```
+
+The simulator runs in one container and the built client behind nginx in
+another, with `/stream`, `/world`, `/metrics` and `/healthz` proxied through.
+The server is also published on `:8080` so `/world` and `/metrics` can be read
+directly. Reshape the world without rebuilding:
+
+```sh
+RAIL_TRAINS=1000 RAIL_RATE=20000 RAIL_HIDE_STATE=true docker compose up
+```
+
 ## Server configuration
 
 Every flag is also readable from an environment variable with a `RAIL_` prefix
