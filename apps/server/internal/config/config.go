@@ -37,11 +37,21 @@ func ParseFormat(s string) (Format, error) {
 // Config holds every tunable of the server. Zero values are not meaningful;
 // build one with Parse or Default.
 type Config struct {
-	Addr      string        // listen address
-	Rate      int           // default updates/sec per client
-	Trains    int           // number of trains
-	Lines     int           // number of generated lines
-	Stations  int           // number of generated stations
+	Addr     string // listen address
+	Rate     int    // default updates/sec per client
+	Trains   int    // number of trains
+	Lines    int    // number of generated lines
+	Stations int    // number of generated stations
+	// Width and Height are the world extent. The plane is flat and arbitrary,
+	// so these can be as large as the map is meant to feel.
+	Width  float64
+	Height float64
+	// StopsPerLine caps how many stations one generated line serves. Raising it
+	// is how a world gets many stations without also needing many lines.
+	StopsPerLine int
+	// Speed is the maximum train speed in world units/sec. Zero derives one
+	// from the world size, so a bigger map does not mean slower trains.
+	Speed     float64
 	Seed      int64         // world seed
 	Tick      time.Duration // simulation step
 	EmitTick  time.Duration // emitter batch interval
@@ -51,18 +61,26 @@ type Config struct {
 	Format    Format        // default wire format
 }
 
+// MaxTrains is the most trains the protocol can address: the binary record
+// carries the train index as a u16 (spec §2).
+const MaxTrains = 65535
+
 // Default returns the configuration described by the spec §3 defaults.
 func Default() Config {
 	return Config{
-		Addr:     ":8080",
-		Rate:     1000,
-		Trains:   100,
-		Lines:    6,
-		Stations: 30,
-		Seed:     42,
-		Tick:     50 * time.Millisecond,
-		EmitTick: 20 * time.Millisecond,
-		Format:   FormatJSON,
+		Addr:         ":8080",
+		Rate:         1000,
+		Trains:       100,
+		Lines:        6,
+		Stations:     30,
+		Width:        1000,
+		Height:       1000,
+		StopsPerLine: 8,
+		Speed:        0,
+		Seed:         42,
+		Tick:         50 * time.Millisecond,
+		EmitTick:     20 * time.Millisecond,
+		Format:       FormatJSON,
 	}
 }
 
@@ -88,6 +106,10 @@ func Parse(args []string, lookupEnv func(string) (string, bool)) (Config, error)
 	fs.IntVar(&cfg.Trains, "trains", cfg.Trains, "number of trains")
 	fs.IntVar(&cfg.Lines, "lines", cfg.Lines, "number of generated lines")
 	fs.IntVar(&cfg.Stations, "stations", cfg.Stations, "number of generated stations")
+	fs.Float64Var(&cfg.Width, "width", cfg.Width, "world width in units")
+	fs.Float64Var(&cfg.Height, "height", cfg.Height, "world height in units")
+	fs.IntVar(&cfg.StopsPerLine, "stops-per-line", cfg.StopsPerLine, "maximum stations served by one generated line")
+	fs.Float64Var(&cfg.Speed, "speed", cfg.Speed, "maximum train speed in units/sec (0 scales it to the world size)")
 	fs.Int64Var(&cfg.Seed, "seed", cfg.Seed, "world seed")
 	fs.DurationVar(&cfg.Tick, "tick", cfg.Tick, "simulation step")
 	fs.DurationVar(&cfg.EmitTick, "emit-tick", cfg.EmitTick, "emitter batch interval")
@@ -143,12 +165,31 @@ func (c Config) Validate() error {
 	if c.Trains < 1 {
 		errs = errors.Join(errs, fmt.Errorf("trains must be >= 1, got %d", c.Trains))
 	}
+	if c.Trains > MaxTrains {
+		// The binary record addresses trains with a u16, so beyond this they
+		// would silently alias onto each other on the wire.
+		errs = errors.Join(errs, fmt.Errorf("trains must be <= %d, got %d", MaxTrains, c.Trains))
+	}
+	if c.Speed < 0 {
+		errs = errors.Join(errs, fmt.Errorf("speed must be >= 0, got %g", c.Speed))
+	}
 	if c.World == "" {
+		if c.Width <= 0 || c.Height <= 0 {
+			errs = errors.Join(errs, fmt.Errorf("width and height must be > 0, got %gx%g", c.Width, c.Height))
+		}
 		if c.Lines < 1 {
 			errs = errors.Join(errs, fmt.Errorf("lines must be >= 1, got %d", c.Lines))
 		}
 		if c.Stations < 3 {
 			errs = errors.Join(errs, fmt.Errorf("stations must be >= 3, got %d", c.Stations))
+		}
+		if c.StopsPerLine < 3 {
+			errs = errors.Join(errs, fmt.Errorf("stops-per-line must be >= 3, got %d", c.StopsPerLine))
+		}
+		if c.Stations > c.Lines*c.StopsPerLine {
+			errs = errors.Join(errs, fmt.Errorf(
+				"%d stations cannot be served by %d lines of at most %d stops: raise --lines or --stops-per-line",
+				c.Stations, c.Lines, c.StopsPerLine))
 		}
 	}
 	if c.Tick <= 0 {
@@ -171,6 +212,10 @@ func (c Config) String() string {
 		{"trains", strconv.Itoa(c.Trains)},
 		{"lines", strconv.Itoa(c.Lines)},
 		{"stations", strconv.Itoa(c.Stations)},
+		{"width", strconv.FormatFloat(c.Width, 'g', -1, 64)},
+		{"height", strconv.FormatFloat(c.Height, 'g', -1, 64)},
+		{"stops-per-line", strconv.Itoa(c.StopsPerLine)},
+		{"speed", strconv.FormatFloat(c.Speed, 'g', -1, 64)},
 		{"seed", strconv.FormatInt(c.Seed, 10)},
 		{"tick", c.Tick.String()},
 		{"emit-tick", c.EmitTick.String()},

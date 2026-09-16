@@ -60,11 +60,23 @@ const NUMBER = new Intl.NumberFormat();
 export class Hud {
   readonly #root: HTMLElement;
   readonly #values = new Map<keyof HudModel, HTMLElement>();
+  #rateInput: HTMLInputElement | null = null;
 
   constructor(root: HTMLElement, state: HudState, handlers: HudHandlers) {
     this.#root = root;
     root.classList.add("hud");
     root.append(this.#buildStats(), this.#buildControls(state, handlers));
+  }
+
+  /**
+   * Shows a rate the app did not choose, such as the server's own default
+   * arriving in the hello frame. Skipped while the field has focus so it cannot
+   * overwrite something being typed.
+   */
+  setRate(rate: number): void {
+    const input = this.#rateInput;
+    if (input === null || input === document.activeElement) return;
+    input.value = String(rate);
   }
 
   /** Writes a new model into the existing nodes. */
@@ -106,6 +118,7 @@ export class Hud {
     rate.step = "100";
     rate.value = String(state.rate);
     rate.id = "hud-rate";
+    this.#rateInput = rate;
     // Commit on change, not on every keystroke.
     rate.addEventListener("change", () => {
       const n = Number(rate.value);

@@ -9,8 +9,27 @@ A Go server simulates trains running on fixed lines between stations and streams
 ## 1. World model (shared)
 
 ### Coordinate space
-- Flat Cartesian plane, default bounds `0–1000 × 0–1000`. No lat/lon or projection.
+- Flat Cartesian plane, default bounds `0–1000 × 0–1000`, resizable with
+  `--width` and `--height`. No lat/lon or projection.
 - Y axis points down, matching canvas coordinates.
+- The plane is arbitrary, so a world may be far larger than the default. Two
+  things follow and the implementation must honour both:
+  - **Speed scales with the world.** Trains keep the default `--speed 0`
+    behaviour of scaling to the shorter side, so a lap takes a comparable time
+    however big the map is. A fixed speed on a 200,000-unit map would mean laps
+    of nearly an hour and no client would ever reconstruct a line.
+  - **Client thresholds scale with the world.** Every distance the client infers
+    with — trail thinning, path matching, stop clustering — is derived from the
+    `bounds` in `hello` rather than fixed, since a threshold only discriminates
+    at the size it was tuned for.
+
+### Limits
+- `--trains` may not exceed **65,535**: the binary record addresses trains with
+  a `u16` (§2), so beyond that they would alias on the wire.
+- `--stations` may not exceed `--lines × --stops-per-line`, since every station
+  must be served by at least one line.
+- Binary `x`/`y` are `f32`, giving roughly seven significant digits. At a
+  1,000,000-unit span that is still sub-0.1-unit precision.
 
 ### Stations
 - Fields: `{ id: string, name: string, x: number, y: number }`.
@@ -118,6 +137,10 @@ Flags, each overridable by an environment variable with the `RAIL_` prefix:
 | `--trains` | `100` | Number of trains |
 | `--lines` | `6` | Number of generated lines |
 | `--stations` | `30` | Number of generated stations |
+| `--width` | `1000` | World width in units |
+| `--height` | `1000` | World height in units |
+| `--stops-per-line` | `8` | Most stations one generated line serves |
+| `--speed` | `0` | Top train speed in units/sec; `0` scales it to the world |
 | `--seed` | `42` | World seed |
 | `--tick` | `50ms` | Simulation step |
 | `--emit-tick` | `20ms` | Emitter batch interval |

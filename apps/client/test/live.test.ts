@@ -8,6 +8,7 @@ import { parseBinaryBatch } from "../src/protocol";
 import { LineInference } from "../src/infer/lines";
 import { StationInference } from "../src/infer/stations";
 import { distToPath } from "../src/infer/geometry";
+import { lineOptionsFor, stationOptionsFor, trailOptionsFor, worldScale } from "../src/scale";
 
 const ADDR = process.env["RAIL_ADDR"] ?? "127.0.0.1:8080";
 const SECONDS = Number(process.env["RAIL_SECONDS"] ?? "180");
@@ -25,6 +26,7 @@ interface WorldLine {
   track: { x: number; y: number }[];
 }
 interface World {
+  bounds: { w: number; h: number };
   stations: WorldStation[];
   lines: WorldLine[];
 }
@@ -35,8 +37,12 @@ describe.runIf(process.env["RAIL_LIVE"] === "1")("live reconstruction", () => {
     async () => {
       const world = (await (await fetch(`http://${ADDR}/world`)).json()) as World;
 
-      const lines = new LineInference();
-      const stations = new StationInference();
+      // Thresholds are world-relative, exactly as the app derives them from
+      // the hello frame, so this check works at any map size.
+      const scale = worldScale(world.bounds);
+      const lines = new LineInference(lineOptionsFor(scale));
+      const stations = new StationInference(stationOptionsFor(scale));
+      void trailOptionsFor(scale);
 
       const ws = new WebSocket(`ws://${ADDR}/stream?rate=${RATE}&format=bin`);
       ws.binaryType = "arraybuffer";
@@ -61,7 +67,8 @@ describe.runIf(process.env["RAIL_LIVE"] === "1")("live reconstruction", () => {
 
       const found = stations.stations();
       console.log(
-        `rate=${RATE} hideState=${String(HIDE)} | ` +
+        `bounds=${String(world.bounds.w)}x${String(world.bounds.h)} scale=${scale.toFixed(1)} ` +
+          `rate=${RATE} hideState=${String(HIDE)} | ` +
           `inferred ${lines.lines.length} lines (truth ${world.lines.length}), ` +
           `${found.length} stations (truth ${world.stations.length})`,
       );
@@ -94,8 +101,8 @@ describe.runIf(process.env["RAIL_LIVE"] === "1")("live reconstruction", () => {
       console.log(`worst line error: ${worstLine.toFixed(2)}`);
 
       expect(found.length).toBe(world.stations.length);
-      expect(worstStation).toBeLessThan(15);
-      expect(worstLine).toBeLessThan(20);
+      expect(worstStation).toBeLessThan(15 * scale);
+      expect(worstLine).toBeLessThan(20 * scale);
       expect(lines.lines.length).toBe(world.lines.length);
     },
     (SECONDS + 30) * 1000,

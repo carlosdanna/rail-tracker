@@ -210,6 +210,83 @@ Identical, 75,685 bytes.
 
 ---
 
+## Larger worlds and higher rates
+
+The world size and the network on it are configurable (`--width`, `--height`,
+`--stations`, `--lines`, `--stops-per-line`, `--speed`), so the numbers above
+were re-taken on a much bigger map.
+
+### Reconstruction on a 200,000 x 200,000 world
+
+```sh
+./apps/server/bin/railsim --addr 127.0.0.1:19100 \
+  --width 200000 --height 200000 --stations 30 --lines 6 --trains 60 --rate 10000
+
+cd apps/client
+RAIL_LIVE=1 RAIL_ADDR=127.0.0.1:19100 RAIL_RATE=10000 RAIL_SECONDS=240 npx vitest run live
+```
+
+```
+bounds=200000x200000 scale=200.0 rate=10000 hideState=false
+inferred 6 lines (truth 6), 30 stations (truth 30)
+worst station error: 0.01
+worst line error: 0.01
+```
+
+Exact, on a map 200x larger in each dimension. Two things make that work, and
+neither is optional:
+
+- **Train speed scales with the world.** `--speed 0` derives the top speed from
+  the shorter side, so a lap takes 49–173 s on a 200,000-unit map instead of
+  hours. At the tuned speed of 30–50 units/sec a single lap would take about 90
+  minutes and no client would ever complete a reconstruction.
+- **Client thresholds scale with the world.** The client derives every distance
+  it infers with from the `bounds` in `hello`. Left unscaled on this map, the
+  4-unit trail threshold is crossed between every pair of updates, so nothing is
+  thinned: trails record every update and overrun their cap, and reconstruction
+  paths hold roughly 3x the points they need.
+
+### A large network
+
+```sh
+./apps/server/bin/railsim --addr 127.0.0.1:19200 \
+  --width 250000 --height 250000 --stations 4000 --lines 200 \
+  --stops-per-line 24 --trains 20000 --rate 100000 --format bin
+```
+
+| | |
+|---|---|
+| World | 250,000 x 250,000 units |
+| Network | 4,000 stations on 200 lines, 16–24 stops each |
+| Trains | 20,000 |
+| Top speed | 12,500 units/sec (derived) |
+| Startup | world generated and serving in under 10 s |
+| RSS | 34 MiB |
+
+### Message rate
+
+Rate is per client, and the ceiling is well above the spec's 10,000:
+
+```sh
+cd apps/server
+go run ./cmd/loadclient -addr 127.0.0.1:19200 -conns 1 -rate 100000 -format bin -duration 10s
+go run ./cmd/loadclient -addr 127.0.0.1:19200 -conns 1 -rate 500000 -format bin -duration 10s
+```
+
+| Requested | Delivered | Bandwidth | `seq` gaps |
+|---|---|---|---|
+| 100,000/sec | 99,800/sec | 2.0 MiB/sec | 0 |
+| 500,000/sec | 499,000/sec | 10.0 MiB/sec | 0 |
+
+Four clients at 100,000/sec each — 400,000 updates/sec out of one process —
+cost **6.1% of one core** at 34 MiB RSS.
+
+The only hard limit found is the protocol's: `--trains` cannot exceed 65,535,
+because the binary record addresses trains with a `u16`. The server now rejects
+that at startup rather than letting train indices silently alias on the wire.
+
+---
+
 ## What is not verified
 
 **Rendered frame rate.** Spec §5.1 asks for ~60 FPS in the browser. This session

@@ -9,15 +9,23 @@ import (
 
 // Generation limits from spec §1.
 const (
-	// MinStops and MaxStops bound the number of stations on a generated line.
+	// MinStops is the fewest stations a generated line serves. MaxStops is the
+	// default ceiling; GenParams.MaxStops overrides it, which is how a world
+	// gets many stations without needing proportionally many lines.
 	MinStops = 3
 	MaxStops = 8
 	// MaxWaypoints is the most intermediate curve points placed between two
 	// consecutive stops.
 	MaxWaypoints = 3
 
-	minTrainSpeed = 30.0
-	maxTrainSpeed = 50.0
+	// defaultMaxSpeed is the top train speed on a world of referenceSpan across.
+	// Bigger worlds scale it up: the point of a larger map is more room, not
+	// longer journeys, and a line that took an hour to run would never be
+	// reconstructed by a client.
+	defaultMaxSpeed = 50.0
+	referenceSpan   = 1000.0
+	// slowestFraction sets the bottom of the per-train speed range.
+	slowestFraction = 0.6
 
 	// RelaxFloor is the fraction of MinStationDistance below which the
 	// generator gives up rather than packing stations closer together.
@@ -49,6 +57,38 @@ type GenParams struct {
 	Stations int
 	Lines    int
 	Trains   int
+	// MaxStops caps the stations on one line. Zero means MaxStops.
+	MaxStops int
+	// MaxSpeed is the fastest a train may run, in units/sec. Zero scales
+	// DefaultMaxSpeed to the world size.
+	MaxSpeed float64
+}
+
+// maxStops returns the effective per-line stop ceiling.
+func (p GenParams) maxStops() int {
+	if p.MaxStops <= 0 {
+		return MaxStops
+	}
+	return p.MaxStops
+}
+
+// DefaultMaxSpeed returns the top train speed for a world of the given size:
+// defaultMaxSpeed on a reference 1000x1000 world, scaled by the shorter side so
+// that a lap takes about as long however big the map is.
+func DefaultMaxSpeed(b Bounds) float64 {
+	span := math.Min(b.W, b.H)
+	if span <= 0 {
+		return defaultMaxSpeed
+	}
+	return defaultMaxSpeed * span / referenceSpan
+}
+
+// maxSpeed returns the effective top train speed.
+func (p GenParams) maxSpeed() float64 {
+	if p.MaxSpeed <= 0 {
+		return DefaultMaxSpeed(p.Bounds)
+	}
+	return p.MaxSpeed
 }
 
 // MinStationDistance is the minimum spacing the generator enforces between two
@@ -75,9 +115,9 @@ func Generate(p GenParams) (*World, error) {
 	if p.Trains < 1 {
 		return nil, fmt.Errorf("need at least 1 train, got %d", p.Trains)
 	}
-	if p.Stations > p.Lines*MaxStops {
+	if p.Stations > p.Lines*p.maxStops() {
 		return nil, fmt.Errorf("cannot serve %d stations with %d lines of at most %d stops each",
-			p.Stations, p.Lines, MaxStops)
+			p.Stations, p.Lines, p.maxStops())
 	}
 
 	// A fixed second stream value keeps the sequence tied to the seed alone.
@@ -102,7 +142,7 @@ func Generate(p GenParams) (*World, error) {
 	if err := w.Validate(); err != nil {
 		return nil, fmt.Errorf("generated world is invalid: %w", err)
 	}
-	if err := validateGenerated(w); err != nil {
+	if err := validateGenerated(w, p.maxStops()); err != nil {
 		return nil, fmt.Errorf("generated world is invalid: %w", err)
 	}
 	return w, nil
@@ -110,13 +150,13 @@ func Generate(p GenParams) (*World, error) {
 
 // validateGenerated enforces the shape constraints that apply to generated
 // worlds only: 3-8 stops per line and at most MaxWaypoints between stops.
-func validateGenerated(w *World) error {
+func validateGenerated(w *World, maxStops int) error {
 	var errs error
 	for i := range w.Lines {
 		l := &w.Lines[i]
-		if n := len(l.Stops); n < MinStops || n > MaxStops {
+		if n := len(l.Stops); n < MinStops || n > maxStops {
 			errs = errors.Join(errs, fmt.Errorf("line %q has %d stops, want %d-%d",
-				l.ID, n, MinStops, MaxStops))
+				l.ID, n, MinStops, maxStops))
 		}
 		for j := 0; j+1 < len(l.stopAt); j++ {
 			if gap := l.stopAt[j+1] - l.stopAt[j] - 1; gap < 0 || gap > MaxWaypoints {
@@ -194,9 +234,9 @@ func genStations(rng *rand.Rand, p GenParams) ([]Station, error) {
 }
 
 // chunkSizes splits n stations into l contiguous groups, each within
-// [MinStops, MaxStops]. The caller has already checked n <= l*MaxStops, so only
+// [MinStops, maxStops]. The caller has already checked n <= l*maxStops, so only
 // the lower bound may need padding, which is reported as a shortfall.
-func chunkSizes(n, l int) []int {
+func chunkSizes(n, l, maxStops int) []int {
 	sizes := make([]int, l)
 	per, rem := n/l, n%l
 	for i := range sizes {
@@ -204,8 +244,8 @@ func chunkSizes(n, l int) []int {
 		if i < rem {
 			sizes[i]++
 		}
-		if sizes[i] > MaxStops {
-			sizes[i] = MaxStops
+		if sizes[i] > maxStops {
+			sizes[i] = maxStops
 		}
 	}
 	return sizes
@@ -215,14 +255,15 @@ func chunkSizes(n, l int) []int {
 // into a short tour, and lays a curved track through them.
 func genLines(rng *rand.Rand, p GenParams, stations []Station) []Line {
 	order := rng.Perm(len(stations))
-	sizes := chunkSizes(len(stations), p.Lines)
+	maxStops := p.maxStops()
+	sizes := chunkSizes(len(stations), p.Lines, maxStops)
 
 	lines := make([]Line, p.Lines)
 	pos := 0
 	for i := range lines {
 		// Take this line's slice of the permutation, then top up to MinStops
 		// with stations from elsewhere if the slice is too small.
-		idx := make([]int, 0, MaxStops)
+		idx := make([]int, 0, maxStops)
 		for j := 0; j < sizes[i] && pos < len(order); j++ {
 			idx = append(idx, order[pos])
 			pos++
@@ -326,6 +367,9 @@ func genTrains(rng *rand.Rand, p GenParams, lines []Line) ([]Train, error) {
 		perLine[l]++
 	}
 
+	top := p.maxSpeed()
+	slowest := top * slowestFraction
+
 	seen := make([]int, len(lines))
 	trains := make([]Train, p.Trains)
 	for i := 0; i < p.Trains; i++ {
@@ -338,7 +382,7 @@ func genTrains(rng *rand.Rand, p GenParams, lines []Line) ([]Train, error) {
 		trains[i] = Train{
 			ID:             fmt.Sprintf("T-%d", i),
 			LineID:         line.ID,
-			MaxSpeed:       minTrainSpeed + rng.Float64()*(maxTrainSpeed-minTrainSpeed),
+			MaxSpeed:       slowest + rng.Float64()*(top-slowest),
 			SegmentIndex:   seg,
 			Progress:       into,
 			Direction:      1,

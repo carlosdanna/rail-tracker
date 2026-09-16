@@ -96,8 +96,10 @@ describe("palette", () => {
 });
 
 describe("app options", () => {
-  it("defaults when the URL says nothing", () => {
-    expect(optionsFromSearch("")).toEqual({ rate: 2000, format: "json", perf: false });
+  it("leaves the rate to the server when the URL says nothing", () => {
+    // null, not a number: the page has no business overriding --rate unless it
+    // was actually asked to, and a pinned rate ignores POST /config.
+    expect(optionsFromSearch("")).toEqual({ rate: null, format: "json", perf: false });
   });
 
   it("reads rate, format and perf", () => {
@@ -108,9 +110,13 @@ describe("app options", () => {
     });
   });
 
-  it("falls back on a nonsense rate", () => {
-    expect(optionsFromSearch("?rate=soon").rate).toBe(2000);
-    expect(optionsFromSearch("?rate=-5").rate).toBe(2000);
+  it("accepts rate=0, which means pause rather than unset", () => {
+    expect(optionsFromSearch("?rate=0").rate).toBe(0);
+  });
+
+  it("falls back to the server rate on a nonsense value", () => {
+    expect(optionsFromSearch("?rate=soon").rate).toBeNull();
+    expect(optionsFromSearch("?rate=-5").rate).toBeNull();
   });
 
   it("treats any format but bin as json", () => {
@@ -121,7 +127,14 @@ describe("app options", () => {
     const http = { protocol: "http:", host: "localhost:5173" } as Location;
     const https = { protocol: "https:", host: "rail.example" } as Location;
     const opts = { rate: 500, format: "bin" as const, perf: false };
-    expect(streamUrl(http, opts)).toBe("ws://localhost:5173/stream?rate=500&format=bin");
-    expect(streamUrl(https, opts)).toBe("wss://rail.example/stream?rate=500&format=bin");
+    expect(streamUrl(http, opts)).toBe("ws://localhost:5173/stream?format=bin&rate=500");
+    expect(streamUrl(https, opts)).toBe("wss://rail.example/stream?format=bin&rate=500");
+  });
+
+  it("omits rate entirely when the server should decide", () => {
+    const http = { protocol: "http:", host: "localhost:5173" } as Location;
+    expect(streamUrl(http, { rate: null, format: "json", perf: false })).toBe(
+      "ws://localhost:5173/stream?format=json",
+    );
   });
 });

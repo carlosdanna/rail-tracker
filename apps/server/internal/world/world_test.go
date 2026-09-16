@@ -2,6 +2,7 @@ package world
 
 import (
 	"bytes"
+	"math"
 	"strings"
 	"testing"
 )
@@ -210,6 +211,144 @@ func TestRoundTripThroughJSON(t *testing.T) {
 				t.Fatalf("line %s: stop %d maps to track point %d != %d",
 					a.ID, j, a.StopTrackIndex(j), b.StopTrackIndex(j))
 			}
+		}
+	}
+}
+
+// TestLargeWorld covers the shape a big map is actually configured with: a
+// plane far larger than the 1000x1000 default, many more stations than six
+// lines of eight stops could serve, and thousands of trains.
+func TestLargeWorld(t *testing.T) {
+	p := GenParams{
+		Seed:     42,
+		Bounds:   Bounds{W: 200_000, H: 200_000},
+		Stations: 2000,
+		Lines:    120,
+		Trains:   5000,
+		MaxStops: 24,
+	}
+	w := mustGenerate(t, p)
+
+	if len(w.Stations) != 2000 || len(w.Lines) != 120 || len(w.Trains) != 5000 {
+		t.Fatalf("got %d stations, %d lines, %d trains",
+			len(w.Stations), len(w.Lines), len(w.Trains))
+	}
+	if w.Bounds.W != 200_000 || w.Bounds.H != 200_000 {
+		t.Fatalf("bounds = %gx%g", w.Bounds.W, w.Bounds.H)
+	}
+
+	served := make(map[StationID]bool, len(w.Stations))
+	for i := range w.Lines {
+		l := &w.Lines[i]
+		if n := len(l.Stops); n < MinStops || n > p.MaxStops {
+			t.Fatalf("line %s has %d stops, want %d-%d", l.ID, n, MinStops, p.MaxStops)
+		}
+		for _, sid := range l.Stops {
+			served[sid] = true
+		}
+		for k, pt := range l.Track {
+			if pt.X < 0 || pt.X > w.Bounds.W || pt.Y < 0 || pt.Y > w.Bounds.H {
+				t.Fatalf("line %s point %d is outside the bounds at (%g, %g)", l.ID, k, pt.X, pt.Y)
+			}
+		}
+	}
+	for _, st := range w.Stations {
+		if !served[st.ID] {
+			t.Fatalf("station %s is not served by any line", st.ID)
+		}
+	}
+
+	// Spacing scales with the world, so stations are not bunched into a corner.
+	floor := MinStationDistance(w.Bounds, len(w.Stations)) * RelaxFloor
+	if got := w.MinStationSpacing(); got < floor {
+		t.Fatalf("closest stations are %g apart, want >= %g", got, floor)
+	}
+}
+
+// TestSpeedScalesWithTheWorld is the reason a big map is usable at all: if
+// trains kept the speed tuned for a 1000-unit world, a lap of a 200,000-unit
+// line would take the better part of an hour and no client would ever see one.
+func TestSpeedScalesWithTheWorld(t *testing.T) {
+	lapSeconds := func(w *World) (fastest, slowest float64) {
+		fastest, slowest = math.Inf(1), 0
+		for _, tr := range w.Trains {
+			l, ok := w.Line(tr.LineID)
+			if !ok {
+				t.Fatalf("train %s on unknown line", tr.ID)
+			}
+			lap := l.TotalLen() / tr.MaxSpeed
+			if lap < fastest {
+				fastest = lap
+			}
+			if lap > slowest {
+				slowest = lap
+			}
+		}
+		return fastest, slowest
+	}
+
+	base := mustGenerate(t, defaultParams(42))
+	baseFast, baseSlow := lapSeconds(base)
+
+	big := mustGenerate(t, GenParams{
+		Seed: 42, Bounds: Bounds{W: 200_000, H: 200_000},
+		Stations: 30, Lines: 6, Trains: 60,
+	})
+	bigFast, bigSlow := lapSeconds(big)
+
+	// A 200x bigger world should take a comparable time to get round, not 200x
+	// longer. Allow a wide band: track layout differs between the two worlds.
+	if bigFast < baseFast/3 || bigFast > baseFast*3 {
+		t.Fatalf("fastest lap %.0fs on the big world vs %.0fs on the default", bigFast, baseFast)
+	}
+	if bigSlow < baseSlow/3 || bigSlow > baseSlow*3 {
+		t.Fatalf("slowest lap %.0fs on the big world vs %.0fs on the default", bigSlow, baseSlow)
+	}
+}
+
+func TestMaxSpeedOverride(t *testing.T) {
+	w := mustGenerate(t, GenParams{
+		Seed: 1, Bounds: Bounds{W: 50_000, H: 50_000},
+		Stations: 30, Lines: 6, Trains: 30,
+		MaxSpeed: 1234,
+	})
+	for _, tr := range w.Trains {
+		if tr.MaxSpeed > 1234 || tr.MaxSpeed < 1234*0.6 {
+			t.Fatalf("train %s has speed %g, want within [%g, 1234]", tr.ID, tr.MaxSpeed, 1234*0.6)
+		}
+	}
+}
+
+func TestDefaultMaxSpeed(t *testing.T) {
+	// The default world keeps exactly the speed the rest of the suite is
+	// tuned against; everything else is proportional to the shorter side.
+	if got := DefaultMaxSpeed(Bounds{W: 1000, H: 1000}); got != 50 {
+		t.Fatalf("DefaultMaxSpeed on the reference world = %g, want 50", got)
+	}
+	if got := DefaultMaxSpeed(Bounds{W: 100_000, H: 100_000}); got != 5000 {
+		t.Fatalf("DefaultMaxSpeed = %g, want 5000", got)
+	}
+	if got := DefaultMaxSpeed(Bounds{W: 200_000, H: 2000}); got != 100 {
+		t.Fatalf("DefaultMaxSpeed uses the shorter side, got %g, want 100", got)
+	}
+}
+
+// TestDefaultWorldUnchanged pins the behaviour the golden fixtures and the
+// determinism guarantee depend on: making the world configurable must not have
+// moved the default one.
+func TestDefaultWorldUnchanged(t *testing.T) {
+	explicit := mustGenerate(t, GenParams{
+		Seed: 42, Bounds: Bounds{W: 1000, H: 1000},
+		Stations: 30, Lines: 6, Trains: 100,
+		MaxStops: 8, MaxSpeed: 50,
+	})
+	implicit := mustGenerate(t, defaultParams(42))
+	if !bytes.Equal(mustJSON(t, explicit), mustJSON(t, implicit)) {
+		t.Fatal("spelling out the defaults produced a different world")
+	}
+	for _, tr := range implicit.Trains {
+		if tr.MaxSpeed < 30 || tr.MaxSpeed > 50 {
+			t.Fatalf("train %s speed %g is outside the historical 30-50 range", tr.ID, tr.MaxSpeed)
 		}
 	}
 }

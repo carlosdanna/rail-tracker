@@ -38,6 +38,63 @@ To push the system harder:
 make dev RAIL_FLAGS="--trains 500 --rate 10000"
 ```
 
+## Sizing the world
+
+The plane is flat and arbitrary, so the map can be as large as you want it to
+feel. A big one needs more stations and more lines to carry them:
+
+```sh
+make dev RAIL_FLAGS="--width 200000 --height 200000 \
+  --stations 2000 --lines 120 --stops-per-line 24 \
+  --trains 5000 --rate 50000"
+```
+
+| Flag | Default | What it does |
+|---|---|---|
+| `--width`, `--height` | `1000` | World extent in units |
+| `--stations` | `30` | Stations to generate |
+| `--lines` | `6` | Lines to generate |
+| `--stops-per-line` | `8` | Most stations one line serves |
+| `--trains` | `100` | Trains, up to 65,535 |
+| `--speed` | `0` | Top speed in units/sec; `0` scales it to the world |
+
+Two rules the server will tell you about if you break them:
+
+- **Every station must be on a line**, so `--stations` cannot exceed
+  `--lines × --stops-per-line`. Raise either one.
+- **At most 65,535 trains**, because the binary record addresses them with a
+  `u16`.
+
+Trains get faster on a bigger map by default, so a lap still takes about a
+minute rather than an hour. Set `--speed` explicitly to override that. The
+client needs no configuration to match: it reads the world size out of the
+`hello` frame and scales every threshold it infers with.
+
+## Setting the message rate
+
+The rate is updates per second **per client**, and there are four ways in:
+
+```sh
+# The server default, for every client that does not ask for its own.
+railsim --rate 50000
+
+# Per connection, at connect time.
+ws://localhost:5173/stream?rate=50000&format=bin
+
+# Live, without reconnecting — this is what the HUD's rate box sends.
+{"type": "setRate", "rate": 50000}
+
+# The default for every client that has not overridden it.
+curl -XPOST localhost:8080/config -d '"'"'{"rate": 50000}'"'"'
+```
+
+Open the page without a `rate` in the URL and it simply runs at whatever the
+server was started with, and follows `POST /config`. Add `?rate=` and that
+connection is pinned to your number instead.
+
+One process sustains 500,000 updates/sec to a single client with no gaps; see
+[`docs/RESULTS.md`](docs/RESULTS.md).
+
 ## Common tasks
 
 | Command      | What it does                                          |

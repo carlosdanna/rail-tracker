@@ -51,9 +51,11 @@ func run(args []string) error {
 	}
 	log.Info("world ready",
 		"source", worldSource(cfg),
+		"bounds", fmt.Sprintf("%gx%g", w.Bounds.W, w.Bounds.H),
 		"stations", len(w.Stations),
 		"lines", len(w.Lines),
 		"trains", len(w.Trains),
+		"maxSpeed", fmt.Sprintf("%.0f units/sec", maxTrainSpeed(w)),
 	)
 
 	// SIGINT/SIGTERM cancel this context, which unwinds everything below.
@@ -121,11 +123,24 @@ func buildWorld(cfg config.Config) (*world.World, error) {
 	}
 	return world.Generate(world.GenParams{
 		Seed:     cfg.Seed,
-		Bounds:   world.Bounds{W: 1000, H: 1000},
+		Bounds:   world.Bounds{W: cfg.Width, H: cfg.Height},
 		Stations: cfg.Stations,
 		Lines:    cfg.Lines,
 		Trains:   cfg.Trains,
+		MaxStops: cfg.StopsPerLine,
+		MaxSpeed: cfg.Speed,
 	})
+}
+
+// maxTrainSpeed reports the fastest train in the world, for the startup banner.
+func maxTrainSpeed(w *world.World) float64 {
+	var top float64
+	for _, t := range w.Trains {
+		if t.MaxSpeed > top {
+			top = t.MaxSpeed
+		}
+	}
+	return top
 }
 
 func worldSource(cfg config.Config) string {
