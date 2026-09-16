@@ -1,0 +1,19 @@
+# Node
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Go
+/apps/server/bin/
+railsim
+loadclient
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local env
+.env
+.env.local

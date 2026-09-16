@@ -1,0 +1,6 @@
+packages:
+  - "apps/*"
+
+# esbuild's postinstall links its prebuilt platform binary into place.
+allowBuilds:
+  esbuild: true
