@@ -4,10 +4,11 @@ dist/
 .vite/
 *.tsbuildinfo
 
-# Go
+# Go — built binaries only. These must stay anchored: a bare "railsim" would
+# also match the cmd/railsim source directory.
 /apps/server/bin/
-railsim
-loadclient
+/apps/server/railsim
+/apps/server/loadclient
 
 # Editors / OS
 .DS_Store
