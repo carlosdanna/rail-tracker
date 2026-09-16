@@ -1,0 +1,108 @@
+:root {
+  --bg: #0e1116;
+  --panel: rgba(18, 23, 31, 0.9);
+  --border: #263041;
+  --text: #dbe2ea;
+  --muted: #8b98a9;
+  --accent: #4dabf7;
+
+  color-scheme: dark;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#app {
+  position: relative;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+#stage {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.hud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  min-width: 232px;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hud-stats {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1px 12px;
+  margin: 0 0 10px;
+}
+
+.hud-stats dt {
+  color: var(--muted);
+}
+
+.hud-stats dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.hud-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.hud-field input[type="number"],
+.hud-field select {
+  width: 96px;
+  padding: 2px 6px;
+  background: #0b0e13;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+
+.hud-check {
+  justify-content: flex-start;
+}
+
+.hud-check input {
+  accent-color: var(--accent);
+}
+
+.hud-note {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}

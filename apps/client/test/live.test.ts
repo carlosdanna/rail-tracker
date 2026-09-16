@@ -1,0 +1,95 @@
+/**
+ * Scratch verification: connect to a running railsim, collect updates until the
+ * trains have gone round once, then compare the reconstruction with /world.
+ * Run with: RAIL_LIVE=1 npx vitest run live.check
+ */
+import { describe, expect, it } from "vitest";
+import { parseBinaryBatch } from "../src/protocol";
+import { LineInference } from "../src/infer/lines";
+import { StationInference } from "../src/infer/stations";
+import { distToPath } from "../src/infer/geometry";
+
+const ADDR = process.env["RAIL_ADDR"] ?? "127.0.0.1:18090";
+const SECONDS = Number(process.env["RAIL_SECONDS"] ?? "120");
+
+interface WorldStation {
+  id: string;
+  x: number;
+  y: number;
+}
+interface WorldLine {
+  id: string;
+  kind: "loop" | "shuttle";
+  track: { x: number; y: number }[];
+}
+interface World {
+  stations: WorldStation[];
+  lines: WorldLine[];
+}
+
+describe.runIf(process.env["RAIL_LIVE"] === "1")("live reconstruction", () => {
+  it(
+    "matches /world after one cycle",
+    async () => {
+      const world = (await (await fetch(`http://${ADDR}/world`)).json()) as World;
+
+      const lines = new LineInference();
+      const stations = new StationInference();
+
+      const ws = new WebSocket(`ws://${ADDR}/stream?rate=4000&format=bin`);
+      ws.binaryType = "arraybuffer";
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = () => reject(new Error("connect failed"));
+      });
+
+      ws.onmessage = (ev: MessageEvent<unknown>) => {
+        if (!(ev.data instanceof ArrayBuffer)) return;
+        const batch = parseBinaryBatch(ev.data);
+        for (const u of batch.updates) {
+          lines.observe(u.id, u.x, u.y, u.heading, u.speed);
+          stations.observe(u.id, u.x, u.y, u.speed, u.state);
+        }
+      };
+
+      await new Promise((r) => setTimeout(r, SECONDS * 1000));
+      ws.close();
+
+      const found = stations.stations();
+      console.log(
+        `inferred ${lines.lines.length} lines (truth ${world.lines.length}), ` +
+          `${found.length} stations (truth ${world.stations.length})`,
+      );
+
+      // Every real station has an inferred one near it.
+      let worstStation = 0;
+      for (const s of world.stations) {
+        const d = Math.min(...found.map((f) => Math.hypot(f.x - s.x, f.y - s.y)));
+        if (d > worstStation) worstStation = d;
+      }
+      console.log(`worst station error: ${worstStation.toFixed(2)}`);
+
+      // Every inferred line lies on a real line.
+      let worstLine = 0;
+      for (const inferred of lines.lines) {
+        let best = Infinity;
+        for (const truth of world.lines) {
+          let worst = 0;
+          for (const p of inferred.points) {
+            const d = distToPath(p, truth.track, truth.kind === "loop");
+            if (d > worst) worst = d;
+          }
+          if (worst < best) best = worst;
+        }
+        if (best > worstLine) worstLine = best;
+      }
+      console.log(`worst line error: ${worstLine.toFixed(2)}`);
+
+      expect(found.length).toBe(world.stations.length);
+      expect(worstStation).toBeLessThan(15);
+      expect(worstLine).toBeLessThan(20);
+      expect(lines.lines.length).toBe(world.lines.length);
+    },
+    (SECONDS + 30) * 1000,
+  );
+});
